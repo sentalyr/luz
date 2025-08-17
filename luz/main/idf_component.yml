@@ -1,0 +1,9 @@
+## IDF Component Manager Manifest File
+targets:
+  - esp32
+dependencies:
+  idf:
+    version: '>=4.1.0'
+  espressif/led_strip: ^3.0.1
+  esp_nimble_cpp:
+    git: git@github.com:h2zero/esp-nimble-cpp.git
