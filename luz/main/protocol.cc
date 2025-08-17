@@ -9,8 +9,6 @@ namespace luz::protocol
 {
 namespace detail
 {
-constexpr auto tag = "PROTOCOL";
-
 uint8_t checksum(std::span<const std::byte> bytes) noexcept { return 0U; }
 
 struct PacketByteIndicator
@@ -119,7 +117,7 @@ void PlacementField::make(std::span<const std::byte, PlacementField::size_bytes>
   placement.color.g = ((color & 0b00011100) >> 2) * 32;
   placement.color.b = (color & 0b00000011) * 64;
 
-  printf("Position = %lu; RGB = %lu, %lu, %lu\n",
+  printf("Position = %u; RGB = %u, %u, %u\n",
          static_cast<uint32_t>(placement.position),
          static_cast<uint32_t>(placement.color.r),
          static_cast<uint32_t>(placement.color.g),

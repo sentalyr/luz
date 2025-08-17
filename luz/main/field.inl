@@ -1,4 +1,6 @@
 #pragma once
+#include "field.hh"
+#include <cstring>
 
 namespace luz
 {

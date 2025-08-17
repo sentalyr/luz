@@ -1,0 +1,20 @@
+#!/bin/sh
+
+set -e
+set -o pipefail
+
+PROJECT_ROOT=$(git rev-parse --show-toplevel)
+CPP_FILES=$(git ls-files --full-name "*.hh" "*.inl" "*.cc""*.h" "*.h" | awk -v root="${PROJECT_ROOT}" '{print root "/" $0}')
+BUILD_DIR="${PROJECT_ROOT}/luz/build"
+TAG="\n[LUZ]"
+
+echo "${TAG} Formatting C++ files"
+echo "${CPP_FILES}" | xargs clang-format -i
+
+# Build first to ensure compiliation DB is up to date
+echo "${TAG}Building project"
+idf.py build -C "${PROJECT_ROOT}/luz"
+
+# Pipe to clang TIDY
+echo "${TAG}Executing clang-tidy"
+echo $CPP_FILES | xargs clang-tidy -p "${BUILD_DIR}"

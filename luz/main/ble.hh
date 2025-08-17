@@ -7,6 +7,7 @@
 
 #include <concepts>
 #include <memory>
+#include <span>
 #include <string_view>
 
 namespace luz::ble

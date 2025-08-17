@@ -1,6 +1,9 @@
 #pragma once
 
+#include "ble.hh"
+
 #include <array>
+#include <format>
 #include <span>
 #include <string_view>
 

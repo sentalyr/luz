@@ -1,0 +1,6 @@
+#!/bin/sh
+
+PROJECT_ROOT=$(git rev-parse --show-toplevel)
+SCRIPT="tidy-up"
+
+source "${PROJECT_ROOT}/${SCRIPT}"
