@@ -98,6 +98,7 @@ extern "C" void app_main(void)
 {
   auto on_write = OnWrite{};
   auto decoy_peripheral = luz::ble::DecoyPeripheral{ peripheral_name, on_write };
+  (void)decoy_peripheral;
 
   ESP_LOGI(tag, "Decoy Peripheral created");
 

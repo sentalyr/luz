@@ -47,6 +47,7 @@ template <typename Elem, size_t NumElems> struct MonotonicAllocator
   std::pmr::polymorphic_allocator<Elem> allocator;
 };
 
+/// Deduction guide
 template <typename Elem, size_t NumElems>
 MonotonicAllocator(std::array<Elem, NumElems>) -> MonotonicAllocator<Elem, NumElems>;
 } // namespace detail
@@ -80,7 +81,6 @@ public:
 
 private:
   std::array<std::byte, detail::default_buffer_size> buffer_memory_{};
-  // TODO can I avoid explit template types in the decl?
   detail::MonotonicAllocator<std::byte, detail::default_buffer_size> buffer_alloc_{
     buffer_memory_
   };
@@ -89,3 +89,5 @@ private:
   std::array<Placement, detail::max_placements_per_climb> placement_memory_{};
 };
 } // namespace luz::protocol
+
+#include "protocol.inl"

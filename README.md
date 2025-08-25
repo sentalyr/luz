@@ -21,8 +21,8 @@ Support for other boards can be implemented by creating a lookup table mapping t
 ## Build
 
 * `cd` to project directory
-* Run `luz build` to build the project
-* Run `luz flash` to flash a connected ESP32
+* Run `idf.py build` to build the project
+* Run `idf.py flash` to flash a connected ESP32
 
 # Additional Resources
 

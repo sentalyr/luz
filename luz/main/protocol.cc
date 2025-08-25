@@ -3,14 +3,13 @@
 
 #include <cstdio>
 #include <memory>
+#include <numeric>
 #include <vector>
 
 namespace luz::protocol
 {
 namespace detail
 {
-uint8_t checksum(std::span<const std::byte> bytes) noexcept { return 0U; }
-
 struct PacketByteIndicator
 {
   static constexpr uint8_t first = 0x01;
@@ -20,11 +19,21 @@ struct PacketByteIndicator
 
 struct IndexMarker
 {
+  using value_type = uint8_t;
   static constexpr uint8_t middle = 0x51;
   static constexpr uint8_t first = 0x52;
   static constexpr uint8_t last = 0x53;
   static constexpr uint8_t solo = 0x54;
 };
+
+uint8_t checksum(std::span<const std::byte> bytes, IndexMarker::value_type index_marker) noexcept
+{
+  return 0xFF
+         & ~(std::accumulate(
+             bytes.begin(), bytes.end(), index_marker, [](uint8_t chksm, std::byte val) {
+               return (chksm + std::to_integer<uint8_t>(val)) & 0xFF;
+             }));
+}
 
 struct PacketHeader
 {
@@ -127,7 +136,6 @@ void PlacementField::make(std::span<const std::byte, PlacementField::size_bytes>
 bool PlacementField::try_iter_make(std::span<const std::byte> bytes,
                                    std::pmr::vector<Placement>& placements) noexcept
 {
-  // TODO something faster than mod operator?
   if ((bytes.size() % PlacementField::size_bytes) != 0UL)
   {
     printf("Payload size must be a multiple of Placement size; %zu mod %zu != 0\n",
@@ -180,8 +188,28 @@ bool Packet::try_make(std::span<const std::byte> bytes, Packet& packet) noexcept
                                 .template first<PacketFooter::size_bytes>();
   PacketFooter::make(footer_bytes, packet.footer);
 
-  // TODO validate byte indicators
-  // TODO calculate checksum
+  if (packet.header.first_byte_indicator != PacketByteIndicator::first)
+  {
+    printf("Invalid first byte indicator: %zu\n", packet.header.first_byte_indicator);
+    return false;
+  }
+  if (packet.header.second_byte_indicator != PacketByteIndicator::second)
+  {
+    printf("Invalid second byte indicator: %zu\n", packet.header.second_byte_indicator);
+    return false;
+  }
+  if (packet.footer.third_byte_indicator != PacketByteIndicator::third)
+  {
+    printf("Invalid third byte indicator: %zu\n", packet.footer.third_byte_indicator);
+    return false;
+  }
+
+  if (auto chksm = checksum(payload_bytes, packet.header.index_marker);
+      chksm != packet.header.checksum)
+  {
+    printf("Checksum mismatch %zu != %zu\n", chksm, packet.header.checksum);
+    return false;
+  }
 
   return true;
 }
@@ -200,33 +228,18 @@ bool Protocol::process(std::span<const std::byte> bytes,
 
   buffer_.clear();
 
-  // TODO handle cases where climb can't fit in single BLE packet
   switch (packet.header.index_marker)
   {
-  // case detail::IndexMarker::middle:
-  //{
-  //   accumulated_placements_.insert(packet.placements.view());
-  //   return false;
-  // }
-  // case detail::IndexMarker::first:
-  //{
-  //   accumulated_placements_.insert(packet.placements.view());
-  //   return false;
-  // }
-  // case detail::IndexMarker::last:
-  //{
-  //   accumulated_placements_.insert(packet.placements.view());
-  //   placements = std::move(accumulated_placements_);
-  //   return true;
-  // }
   case detail::IndexMarker::solo:
-  {
     return true;
-  }
   default:
   {
+    // TODO handle cases where climb can't fit in single BLE packet
+    // case detail::IndexMarker::middle:
+    // case detail::IndexMarker::first:
+    // case detail::IndexMarker::last:
     printf("FAILURE: index_marker != solo unimplemented");
-    std::abort();
+    return false;
   }
   }
 }

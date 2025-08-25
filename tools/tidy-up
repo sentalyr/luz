@@ -1,21 +1,25 @@
 #!/bin/sh
 
+# This script formats and lints the project with clang-format and clang-tidy respectively
+
 set -e
 set -o pipefail
 
+
 PROJECT_ROOT=$(git rev-parse --show-toplevel)
-CPP_FILES=$(git ls-files --full-name "*.hh" "*.inl" "*.cc""*.h" "*.h" | awk -v root="${PROJECT_ROOT}" '{print root "/" $0}')
+
+pushd $PROJECT_ROOT
+
+CPP_FILES=$(git ls-files --full-name "*.hh" "*.inl" "*.cc" "*.h" "*.hpp" | awk -v root="${PROJECT_ROOT}" '{print root "/" $0}')
 BUILD_DIR="${PROJECT_ROOT}/luz/build"
 TAG="\n[LUZ]"
-
-pushd "${PROJECT_ROOT}/luz"
 
 echo "${TAG} Formatting C++ files"
 echo "${CPP_FILES}" | xargs clang-format -i
 
 # Build first to ensure compiliation DB is up to date
-echo "${TAG}Building project"
-idf.py build -C "${PROJECT_ROOT}/luz"
+#echo "${TAG}Building project"
+#idf.py build -C "${PROJECT_ROOT}/luz"
 
 # Pipe to clang TIDY
 echo "${TAG}Executing clang-tidy"

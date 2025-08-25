@@ -10,7 +10,7 @@ enable_testing()
 find_package(Catch2 REQUIRED)
 
 add_executable(protocol_test protocol_test.cc ${CMAKE_CURRENT_SOURCE_DIR}/../protocol.cc)
-target_compile_options(protocol_test PRIVATE -std=gnu++23)
+target_compile_options(protocol_test PRIVATE -std=c++23)
 
 target_include_directories(protocol_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
 target_link_directories(protocol_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
