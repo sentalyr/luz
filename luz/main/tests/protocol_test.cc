@@ -8,6 +8,27 @@
 
 namespace luz::protocol::test
 {
+constexpr auto wilbur_wright_takes_flight_p1
+    = std::array{ std::byte{ 0x01 }, std::byte{ 0x1F }, std::byte{ 0xD6 }, std::byte{ 0x02 },
+                  std::byte{ 0x54 }, std::byte{ 0x29 }, std::byte{ 0x01 }, std::byte{ 0xE0 },
+                  std::byte{ 0x6C }, std::byte{ 0x00 }, std::byte{ 0xE3 }, std::byte{ 0x8D },
+                  std::byte{ 0x01 }, std::byte{ 0x03 }, std::byte{ 0x12 }, std::byte{ 0x01 },
+                  std::byte{ 0x1C }, std::byte{ 0xAA }, std::byte{ 0x00 }, std::byte{ 0x1C } };
+constexpr auto wilbur_wright_takes_flight_p2 = std::array{
+  std::byte{ 0xEC }, std::byte{ 0x00 }, std::byte{ 0x03 }, std::byte{ 0x0F },
+  std::byte{ 0x01 }, std::byte{ 0x03 }, std::byte{ 0x34 }, std::byte{ 0x01 },
+  std::byte{ 0xE3 }, std::byte{ 0x7C }, std::byte{ 0x01 }, std::byte{ 0xE3 },
+  std::byte{ 0x78 }, std::byte{ 0x01 }, std::byte{ 0x03 }, std::byte{ 0x03 },
+};
+
+constexpr auto wilbur_wright_takes_flight_expected = std::array{
+  Placement{ 297U, Color{ 224, 0, 0 } },   Placement{ 108U, Color{ 224, 0, 192 } },
+  Placement{ 397U, Color{ 0, 0, 192 } },   Placement{ 274U, Color{ 0, 224, 0 } },
+  Placement{ 170U, Color{ 0, 224, 0 } },   Placement{ 236U, Color{ 0, 0, 192 } },
+  Placement{ 271U, Color{ 0, 0, 192 } },   Placement{ 308U, Color{ 224, 0, 192 } },
+  Placement{ 380U, Color{ 224, 0, 192 } }, Placement{ 376U, Color{ 0, 0, 192 } },
+};
+
 TEST_CASE("top row")
 {
   constexpr auto top_row_p1
@@ -48,26 +69,6 @@ TEST_CASE("top row")
 
 TEST_CASE("decode wilbur_write_takes_flight")
 {
-  constexpr auto wilbur_wright_takes_flight_p1
-      = std::array{ std::byte{ 0x01 }, std::byte{ 0x1F }, std::byte{ 0xD6 }, std::byte{ 0x02 },
-                    std::byte{ 0x54 }, std::byte{ 0x29 }, std::byte{ 0x01 }, std::byte{ 0xE0 },
-                    std::byte{ 0x6C }, std::byte{ 0x00 }, std::byte{ 0xE3 }, std::byte{ 0x8D },
-                    std::byte{ 0x01 }, std::byte{ 0x03 }, std::byte{ 0x12 }, std::byte{ 0x01 },
-                    std::byte{ 0x1C }, std::byte{ 0xAA }, std::byte{ 0x00 }, std::byte{ 0x1C } };
-  constexpr auto wilbur_wright_takes_flight_p2 = std::array{
-    std::byte{ 0xEC }, std::byte{ 0x00 }, std::byte{ 0x03 }, std::byte{ 0x0F },
-    std::byte{ 0x01 }, std::byte{ 0x03 }, std::byte{ 0x34 }, std::byte{ 0x01 },
-    std::byte{ 0xE3 }, std::byte{ 0x7C }, std::byte{ 0x01 }, std::byte{ 0xE3 },
-    std::byte{ 0x78 }, std::byte{ 0x01 }, std::byte{ 0x03 }, std::byte{ 0x03 },
-  };
-
-  constexpr auto expected_placements = std::array{
-    Placement{ 297U, Color{ 224, 0, 0 } },   Placement{ 108U, Color{ 224, 0, 192 } },
-    Placement{ 397U, Color{ 0, 0, 192 } },   Placement{ 274U, Color{ 0, 224, 0 } },
-    Placement{ 170U, Color{ 0, 224, 0 } },   Placement{ 236U, Color{ 0, 0, 192 } },
-    Placement{ 271U, Color{ 0, 0, 192 } },   Placement{ 308U, Color{ 224, 0, 192 } },
-    Placement{ 380U, Color{ 224, 0, 192 } }, Placement{ 376U, Color{ 0, 0, 192 } },
-  };
 
   Protocol protocol{};
   auto placement_allocator = protocol.placement_allocator();
@@ -75,11 +76,41 @@ TEST_CASE("decode wilbur_write_takes_flight")
   REQUIRE_FALSE(protocol.process(wilbur_wright_takes_flight_p1, placements));
   REQUIRE(protocol.process(wilbur_wright_takes_flight_p2, placements));
 
-  REQUIRE(placements.size() == expected_placements.size());
+  REQUIRE(placements.size() == wilbur_wright_takes_flight_expected.size());
 
-  for (size_t i = 0UL; i < expected_placements.size(); ++i)
+  for (size_t i = 0UL; i < wilbur_wright_takes_flight_expected.size(); ++i)
   {
-    REQUIRE(placements[i] == expected_placements[i]);
+    REQUIRE(placements[i] == wilbur_wright_takes_flight_expected[i]);
+  }
+}
+
+TEST_CASE("decode wilbur_write_takes_flight simulate dropped packet", "[packet_drop]")
+{
+  Protocol protocol{};
+  auto placement_allocator = protocol.placement_allocator();
+  auto placements = placement_allocator.vector();
+
+  SECTION("2,1,2")
+  {
+    /// Start with part 2 and follow with parts 1 and 2
+    REQUIRE_FALSE(protocol.process(wilbur_wright_takes_flight_p2, placements));
+    REQUIRE_FALSE(protocol.process(wilbur_wright_takes_flight_p1, placements));
+    REQUIRE(protocol.process(wilbur_wright_takes_flight_p2, placements));
+  }
+
+  SECTION("1,1,2")
+  {
+    /// Start with part 1 and follow with parts 1 and 2
+    REQUIRE_FALSE(protocol.process(wilbur_wright_takes_flight_p1, placements));
+    REQUIRE_FALSE(protocol.process(wilbur_wright_takes_flight_p1, placements));
+    REQUIRE(protocol.process(wilbur_wright_takes_flight_p2, placements));
+  }
+
+  REQUIRE(placements.size() == wilbur_wright_takes_flight_expected.size());
+
+  for (size_t i = 0UL; i < wilbur_wright_takes_flight_expected.size(); ++i)
+  {
+    REQUIRE(placements[i] == wilbur_wright_takes_flight_expected[i]);
   }
 }
 

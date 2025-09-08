@@ -10,6 +10,18 @@ namespace luz::protocol
 {
 namespace detail
 {
+
+enum class ProtocolStatus
+{
+  success = 0,
+  incomplete,
+  insufficient_header_bytes,
+  bad_header,
+  bad_payload,
+  bad_footer,
+  bad_checksum,
+};
+
 struct PacketByteIndicator
 {
   static constexpr uint8_t first = 0x01;
@@ -44,7 +56,7 @@ struct PacketHeader
   static constexpr auto index_marker_field = offset_from<uint8_t>(second_byte_indicator_field);
   static constexpr auto size_bytes = offset_from<uint8_t>(index_marker_field).offset;
 
-  static void make(std::span<const std::byte, size_bytes> bytes, PacketHeader& header) noexcept;
+  static bool make(std::span<const std::byte, size_bytes> bytes, PacketHeader& header) noexcept;
 
   uint8_t first_byte_indicator{};
   uint8_t payload_size{};
@@ -58,7 +70,7 @@ struct PacketFooter
   static constexpr auto third_byte_indicator_field = Field<uint8_t>{ 0U };
   static constexpr auto size_bytes = offset_from<uint8_t>(third_byte_indicator_field).offset;
 
-  static void make(std::span<const std::byte, size_bytes> bytes, PacketFooter& footer) noexcept;
+  static bool make(std::span<const std::byte, size_bytes> bytes, PacketFooter& footer) noexcept;
 
   uint8_t third_byte_indicator{};
 };
@@ -88,32 +100,54 @@ public:
   Packet(Packet&&) = delete;
   Packet& operator=(Packet&&) = delete;
 
-  static bool try_make(std::span<const std::byte> bytes, Packet& packet) noexcept;
+  static ProtocolStatus try_make(std::span<const std::byte> bytes, Packet& packet) noexcept;
 
   PacketHeader header{};
   std::pmr::vector<Placement>* placements;
   PacketFooter footer{};
 };
 
-void PacketHeader::make(std::span<const std::byte, PacketHeader::size_bytes> bytes,
+bool PacketHeader::make(std::span<const std::byte, PacketHeader::size_bytes> bytes,
                         PacketHeader& header) noexcept
 {
   header.first_byte_indicator = first_byte_indicator_field.value(bytes);
+  if (header.first_byte_indicator != PacketByteIndicator::first)
+  {
+    printf("Invalid first byte indicator: %zu\n", header.first_byte_indicator);
+    return false;
+  }
 
   // The index_marker is counted as part of the payload, but we've added to the header.
   header.payload_size = payload_size_field.value(bytes) - index_marker_field.size;
-
-  printf("HEADER payload size %d, %d", payload_size_field.value(bytes), index_marker_field.size);
-
   header.checksum = checksum_field.value(bytes);
+
   header.second_byte_indicator = second_byte_indicator_field.value(bytes);
+  if (header.second_byte_indicator != PacketByteIndicator::second)
+  {
+    printf("Invalid second byte indicator: %zu\n", header.second_byte_indicator);
+    return false;
+  }
+
   header.index_marker = index_marker_field.value(bytes);
+  if (header.index_marker != IndexMarker::middle && header.index_marker != IndexMarker::first
+      && header.index_marker != IndexMarker::last && header.index_marker != IndexMarker::solo)
+  {
+    return false;
+  }
+
+  return true;
 }
 
-void PacketFooter::make(std::span<const std::byte, PacketFooter::size_bytes> bytes,
+bool PacketFooter::make(std::span<const std::byte, PacketFooter::size_bytes> bytes,
                         PacketFooter& footer) noexcept
 {
   footer.third_byte_indicator = third_byte_indicator_field.value(bytes);
+  if (footer.third_byte_indicator != PacketByteIndicator::third)
+  {
+    printf("Invalid third byte indicator: %zu\n", footer.third_byte_indicator);
+    return false;
+  }
+  return true;
 }
 
 void PlacementField::make(std::span<const std::byte, PlacementField::size_bytes> bytes,
@@ -158,22 +192,26 @@ Packet::Packet(std::pmr::vector<Placement>& _placements) noexcept
 {
 }
 
-bool Packet::try_make(std::span<const std::byte> bytes, Packet& packet) noexcept
+ProtocolStatus Packet::try_make(std::span<const std::byte> bytes, Packet& packet) noexcept
 {
   if (bytes.size() < PacketHeader::size_bytes)
   {
     printf("Not enough bytes for header\n");
-    return false;
+    return ProtocolStatus::insufficient_header_bytes;
   }
 
-  PacketHeader::make(bytes.template subspan<0, PacketHeader::size_bytes>(), packet.header);
+  if (!PacketHeader::make(bytes.template subspan<0, PacketHeader::size_bytes>(), packet.header))
+  {
+    printf("BAD HEADER\n");
+    return ProtocolStatus::bad_header;
+  }
 
   if (bytes.size() < (fixed_elem_size + packet.header.payload_size))
   {
     printf("Not enough bytes for payload and footer %d < %d\n",
            bytes.size(),
            (fixed_elem_size + packet.header.payload_size));
-    return false;
+    return ProtocolStatus::incomplete;
   }
 
   const auto payload_bytes = bytes.subspan(PacketHeader::size_bytes, packet.header.payload_size);
@@ -181,66 +219,64 @@ bool Packet::try_make(std::span<const std::byte> bytes, Packet& packet) noexcept
   if (!PlacementField::try_iter_make(payload_bytes, *packet.placements))
   {
     printf("Failed to create placements\n");
-    return false;
-  }
-
-  const auto footer_bytes = bytes.subspan(PacketHeader::size_bytes + packet.header.payload_size)
-                                .template first<PacketFooter::size_bytes>();
-  PacketFooter::make(footer_bytes, packet.footer);
-
-  if (packet.header.first_byte_indicator != PacketByteIndicator::first)
-  {
-    printf("Invalid first byte indicator: %zu\n", packet.header.first_byte_indicator);
-    return false;
-  }
-  if (packet.header.second_byte_indicator != PacketByteIndicator::second)
-  {
-    printf("Invalid second byte indicator: %zu\n", packet.header.second_byte_indicator);
-    return false;
-  }
-  if (packet.footer.third_byte_indicator != PacketByteIndicator::third)
-  {
-    printf("Invalid third byte indicator: %zu\n", packet.footer.third_byte_indicator);
-    return false;
+    return ProtocolStatus::bad_payload;
   }
 
   if (auto chksm = checksum(payload_bytes, packet.header.index_marker);
       chksm != packet.header.checksum)
   {
     printf("Checksum mismatch %zu != %zu\n", chksm, packet.header.checksum);
-    return false;
+    return ProtocolStatus::bad_checksum;
   }
 
-  return true;
+  const auto footer_bytes = bytes.subspan(PacketHeader::size_bytes + packet.header.payload_size)
+                                .template first<PacketFooter::size_bytes>();
+  if (!PacketFooter::make(footer_bytes, packet.footer))
+  {
+    return ProtocolStatus::bad_footer;
+  }
+
+  return ProtocolStatus::success;
 }
 } // namespace detail
 
 bool Protocol::process(std::span<const std::byte> bytes,
                        std::pmr::vector<Placement>& placements) noexcept
 {
+  // TODO make buffer_ a ring buffer.
+  // Spans get harder though.
+  if (buffer_.size() + bytes.size() > buffer_.capacity())
+  {
+    printf("Incoming packet would exceed buffer capacity; discarding prior packets");
+    // TODO Don't want to clear entirety since other packets + incoming may form a climb...
+    buffer_.clear();
+  }
+
   std::copy(bytes.begin(), bytes.end(), std::back_inserter(buffer_));
 
   auto packet = detail::Packet{ placements };
-  if (!detail::Packet::try_make(buffer_, packet))
+  switch (detail::Packet::try_make(buffer_, packet))
   {
-    return false;
-  }
-
-  buffer_.clear();
-
-  switch (packet.header.index_marker)
+  case detail::ProtocolStatus::success:
   {
-  case detail::IndexMarker::solo:
+    buffer_.clear();
     return true;
-  default:
+  }
+  case detail::ProtocolStatus::incomplete:
   {
-    // TODO handle cases where climb can't fit in single BLE packet
-    // case detail::IndexMarker::middle:
-    // case detail::IndexMarker::first:
-    // case detail::IndexMarker::last:
-    printf("FAILURE: index_marker != solo unimplemented");
+    /// Accumulate additional packets
     return false;
   }
+  case detail::ProtocolStatus::bad_header:
+  {
+    /// Accumulate additional packets
+    // TODO may want to retain some of the packets if there are more than 1.
+    printf("BAD HEADER clearning buffer.\n");
+    buffer_.clear();
+    return false;
+  }
+  default:
+    return false;
   }
 }
 } // namespace luz::protocol
