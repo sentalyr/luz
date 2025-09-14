@@ -51,13 +51,13 @@ TEST_CASE("top row")
                     std::byte{ 3 } };
 
   auto protocol = Protocol{};
-  auto placement_allocator = protocol.placement_allocator();
-  auto placements = placement_allocator.vector();
+  Packet packet{};
 
-  REQUIRE_FALSE(protocol.process(top_row_p1, placements));
-  REQUIRE_FALSE(protocol.process(top_row_p2, placements));
-  REQUIRE(protocol.process(top_row_p3, placements));
+  REQUIRE_FALSE(protocol.process(top_row_p1, packet));
+  REQUIRE_FALSE(protocol.process(top_row_p2, packet));
+  REQUIRE(protocol.process(top_row_p3, packet));
 
+  auto& placements = packet.placements;
   REQUIRE(placements.size() == 17UL);
   REQUIRE(placements[0].position == 17UL);
 
@@ -69,13 +69,12 @@ TEST_CASE("top row")
 
 TEST_CASE("decode wilbur_write_takes_flight")
 {
-
   Protocol protocol{};
-  auto placement_allocator = protocol.placement_allocator();
-  auto placements = placement_allocator.vector();
-  REQUIRE_FALSE(protocol.process(wilbur_wright_takes_flight_p1, placements));
-  REQUIRE(protocol.process(wilbur_wright_takes_flight_p2, placements));
+  Packet packet{};
+  REQUIRE_FALSE(protocol.process(wilbur_wright_takes_flight_p1, packet));
+  REQUIRE(protocol.process(wilbur_wright_takes_flight_p2, packet));
 
+  auto& placements = packet.placements;
   REQUIRE(placements.size() == wilbur_wright_takes_flight_expected.size());
 
   for (size_t i = 0UL; i < wilbur_wright_takes_flight_expected.size(); ++i)
@@ -87,25 +86,25 @@ TEST_CASE("decode wilbur_write_takes_flight")
 TEST_CASE("decode wilbur_write_takes_flight simulate dropped packet", "[packet_drop]")
 {
   Protocol protocol{};
-  auto placement_allocator = protocol.placement_allocator();
-  auto placements = placement_allocator.vector();
+  Packet packet{};
 
   SECTION("2,1,2")
   {
     /// Start with part 2 and follow with parts 1 and 2
-    REQUIRE_FALSE(protocol.process(wilbur_wright_takes_flight_p2, placements));
-    REQUIRE_FALSE(protocol.process(wilbur_wright_takes_flight_p1, placements));
-    REQUIRE(protocol.process(wilbur_wright_takes_flight_p2, placements));
+    REQUIRE_FALSE(protocol.process(wilbur_wright_takes_flight_p2, packet));
+    REQUIRE_FALSE(protocol.process(wilbur_wright_takes_flight_p1, packet));
+    REQUIRE(protocol.process(wilbur_wright_takes_flight_p2, packet));
   }
 
   SECTION("1,1,2")
   {
     /// Start with part 1 and follow with parts 1 and 2
-    REQUIRE_FALSE(protocol.process(wilbur_wright_takes_flight_p1, placements));
-    REQUIRE_FALSE(protocol.process(wilbur_wright_takes_flight_p1, placements));
-    REQUIRE(protocol.process(wilbur_wright_takes_flight_p2, placements));
+    REQUIRE_FALSE(protocol.process(wilbur_wright_takes_flight_p1, packet));
+    REQUIRE_FALSE(protocol.process(wilbur_wright_takes_flight_p1, packet));
+    REQUIRE(protocol.process(wilbur_wright_takes_flight_p2, packet));
   }
 
+  auto& placements = packet.placements;
   REQUIRE(placements.size() == wilbur_wright_takes_flight_expected.size());
 
   for (size_t i = 0UL; i < wilbur_wright_takes_flight_expected.size(); ++i)
@@ -114,37 +113,27 @@ TEST_CASE("decode wilbur_write_takes_flight simulate dropped packet", "[packet_d
   }
 }
 
-// TODO ADD FAILURE TEST CASES
+TEST_CASE("decode wilbur_write_takes_flight incorrect byte indicators", "[byte_indicators]")
+{
+  Protocol protocol{};
+  Packet packet{};
 
-// Little Critters
-// TEST_CASE("decode little_critters")
-//{
-//  // TODO verify payload
-//  constexpr auto little_critters_p1 = std::array{
-//    std::byte{ 0XCE }, std::byte{ 0X1 },  std::byte{ 0XE3 }, std::byte{ 0X6 }, std::byte{ 0X1 },
-//    std::byte{ 0XE0 }, std::byte{ 0X57 }, std::byte{ 0X1 },  std::byte{ 0X3 }, std::byte{ 0XF },
-//    std::byte{ 0X1 },  std::byte{ 0X3 },  std::byte{ 0X7C }, std::byte{ 0X1 }, std::byte{ 0X1C },
-//    std::byte{ 0XC2 }, std::byte{ 0X1 },  std::byte{ 0X1C }, std::byte{ 0X3 },
-//  };
-//  constexpr auto expected_placements = std::array{
-//    Placement{ 327U, Color{ 0, 0, 192 } }, Placement{ 366U, Color{ 0, 0, 192 } },
-//    Placement{ 433U, Color{ 0, 0, 192 } }, Placement{ 245U, Color{ 224, 0, 192 } },
-//    Placement{ 322U, Color{ 0, 0, 192 } }, Placement{ 462U, Color{ 224, 0, 192 } },
-//    Placement{ 262U, Color{ 224, 0, 0 } }, Placement{ 343U, Color{ 0, 0, 192 } },
-//    Placement{ 271U, Color{ 0, 0, 192 } }, Placement{ 380U, Color{ 0, 224, 0 } },
-//    Placement{ 450U, Color{ 0, 224, 0 } },
-//  };
+  auto wilbur_wright_takes_flight_p1_v
+      = std::vector<std::byte>{ wilbur_wright_takes_flight_p1.begin(),
+                                wilbur_wright_takes_flight_p1.end() };
+  auto wilbur_wright_takes_flight_p2_v
+      = std::vector<std::byte>{ wilbur_wright_takes_flight_p2.begin(),
+                                wilbur_wright_takes_flight_p2.end() };
 
-//  Protocol protocol{};
-//  auto placement_allocator = protocol.placement_allocator();
-//  auto placements = placement_allocator.vector();
+  SECTION("first byte indicator") { wilbur_wright_takes_flight_p1_v[0] = std::byte{ 0x02 }; }
 
-//  REQUIRE(protocol.process(little_critters_p1, placements));
-//  REQUIRE(placements.size() == expected_placements.size());
+  SECTION("second byte indicator") { wilbur_wright_takes_flight_p1_v[3] = std::byte{ 0x03 }; }
 
-//  for (size_t i = 0UL; i < expected_placements.size(); ++i)
-//  {
-//    REQUIRE(placements[i] == expected_placements[i]);
-//  }
-//}
+  SECTION("third byte indicator") { wilbur_wright_takes_flight_p2_v.back() = std::byte{ 0x01 }; }
+
+  REQUIRE_FALSE(protocol.process(wilbur_wright_takes_flight_p1_v, packet));
+  REQUIRE_FALSE(protocol.process(wilbur_wright_takes_flight_p2_v, packet));
+  REQUIRE_FALSE(protocol.process(wilbur_wright_takes_flight_p1, packet));
+  REQUIRE(protocol.process(wilbur_wright_takes_flight_p2, packet));
+}
 } // namespace luz::protocol::test

@@ -1,11 +1,12 @@
 #pragma once
 
-#include "placement.hh"
+#include "packet.hh"
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <list>
 #include <memory_resource>
 #include <span>
 #include <vector>
@@ -50,6 +51,7 @@ template <typename Elem, size_t NumElems> struct MonotonicAllocator
 /// Deduction guide
 template <typename Elem, size_t NumElems>
 MonotonicAllocator(std::array<Elem, NumElems>) -> MonotonicAllocator<Elem, NumElems>;
+
 } // namespace detail
 
 class Protocol
@@ -72,7 +74,7 @@ public:
   /// @param[out] placements The set of placements if parsing the incoming payload completes the
   /// set
   /// @return Boolean indicating if the set of placements is valid
-  bool process(std::span<const std::byte> bytes, std::pmr::vector<Placement>& placements) noexcept;
+  bool process(std::span<const std::byte> bytes, Packet& packet) noexcept;
 
   PlacementAllocator placement_allocator() noexcept
   {
@@ -87,6 +89,8 @@ private:
   decltype(buffer_alloc_)::Vector buffer_{ buffer_alloc_.capped_vector() };
 
   std::array<Placement, detail::max_placements_per_climb> placement_memory_{};
+
+  std::list<std::vector<std::byte>> buffers_{};
 };
 } // namespace luz::protocol
 

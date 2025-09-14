@@ -2,7 +2,7 @@
 #include "color.hh"
 #include "database.hh"
 #include "led.hh"
-#include "placement.hh"
+#include "packet.hh"
 #include "protocol.hh"
 
 #include <algorithm>
@@ -34,15 +34,14 @@ public:
   /// @param bytes The payload written by the client
   void operator()(std::span<const std::byte> bytes) noexcept
   {
-    auto placement_allocator = protocol_.placement_allocator();
-    auto placements = placement_allocator.vector();
-    if (protocol_.process(bytes, placements))
+    luz::Packet packet{};
+    if (protocol_.process(bytes, packet))
     {
       ESP_LOGD(tag, "OnWrite: Recieved a packet!");
 
       leds_.clear();
 
-      std::ranges::for_each(placements, [this](const auto& placement) {
+      std::ranges::for_each(packet.placements, [this](const auto& placement) {
         ESP_LOGD(tag,
                  "Placement: %d: Color(r=%#X, g=%#X, b=%#X)",
                  placement.position,

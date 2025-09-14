@@ -1,9 +1,11 @@
 #include "protocol.hh"
 #include "field.hh"
+#include "packet.hh"
 
 #include <cstdio>
 #include <memory>
 #include <numeric>
+#include <utility>
 #include <vector>
 
 namespace luz::protocol
@@ -22,32 +24,18 @@ enum class ProtocolStatus
   bad_checksum,
 };
 
-struct PacketByteIndicator
-{
-  static constexpr uint8_t first = 0x01;
-  static constexpr uint8_t second = 0x02;
-  static constexpr uint8_t third = 0x03;
-};
-
-struct IndexMarker
-{
-  using value_type = uint8_t;
-  static constexpr uint8_t middle = 0x51;
-  static constexpr uint8_t first = 0x52;
-  static constexpr uint8_t last = 0x53;
-  static constexpr uint8_t solo = 0x54;
-};
-
-uint8_t checksum(std::span<const std::byte> bytes, IndexMarker::value_type index_marker) noexcept
+uint8_t checksum(std::span<const std::byte> bytes, IndexMarker index_marker) noexcept
 {
   return 0xFF
-         & ~(std::accumulate(
-             bytes.begin(), bytes.end(), index_marker, [](uint8_t chksm, std::byte val) {
-               return (chksm + std::to_integer<uint8_t>(val)) & 0xFF;
-             }));
+         & ~(std::accumulate(bytes.begin(),
+                             bytes.end(),
+                             static_cast<std::underlying_type_t<IndexMarker>>(index_marker),
+                             [](uint8_t chksm, std::byte val) {
+                               return (chksm + std::to_integer<uint8_t>(val)) & 0xFF;
+                             }));
 }
 
-struct PacketHeader
+struct HeaderDecoder
 {
   static constexpr auto first_byte_indicator_field = Field<uint8_t>{ 0U };
   static constexpr auto payload_size_field = offset_from<uint8_t>(first_byte_indicator_field);
@@ -56,26 +44,18 @@ struct PacketHeader
   static constexpr auto index_marker_field = offset_from<uint8_t>(second_byte_indicator_field);
   static constexpr auto size_bytes = offset_from<uint8_t>(index_marker_field).offset;
 
-  static bool make(std::span<const std::byte, size_bytes> bytes, PacketHeader& header) noexcept;
-
-  uint8_t first_byte_indicator{};
-  uint8_t payload_size{};
-  uint8_t checksum{};
-  uint8_t second_byte_indicator{};
-  uint8_t index_marker{};
+  static bool make(std::span<const std::byte, size_bytes> bytes, Packet::Header& header) noexcept;
 };
 
-struct PacketFooter
+struct FooterDecoder
 {
   static constexpr auto third_byte_indicator_field = Field<uint8_t>{ 0U };
   static constexpr auto size_bytes = offset_from<uint8_t>(third_byte_indicator_field).offset;
 
-  static bool make(std::span<const std::byte, size_bytes> bytes, PacketFooter& footer) noexcept;
-
-  uint8_t third_byte_indicator{};
+  static bool make(std::span<const std::byte, size_bytes> bytes, Packet::Footer& footer) noexcept;
 };
 
-struct PlacementField
+struct PlacementDecoder
 {
   static constexpr auto position_field = Field<uint16_t>{ 0U };
   static constexpr auto color_field = offset_from<uint8_t>(position_field);
@@ -86,34 +66,18 @@ struct PlacementField
   static void make(std::span<const std::byte, size_bytes> bytes, Placement& placement) noexcept;
 };
 
-class Packet
+struct PacketDecoder
 {
-  static constexpr size_t fixed_elem_size = PacketHeader::size_bytes + PacketFooter::size_bytes;
-
-public:
-  Packet(std::pmr::vector<Placement>& _placements) noexcept;
-  ~Packet() noexcept = default;
-
-  /// Copy/move constructor/assignment
-  Packet(const Packet&) = delete;
-  Packet& operator=(const Packet&) = delete;
-  Packet(Packet&&) = delete;
-  Packet& operator=(Packet&&) = delete;
-
+  static constexpr size_t fixed_elem_size = HeaderDecoder::size_bytes + FooterDecoder::size_bytes;
   static ProtocolStatus try_make(std::span<const std::byte> bytes, Packet& packet) noexcept;
-
-  PacketHeader header{};
-  std::pmr::vector<Placement>* placements;
-  PacketFooter footer{};
 };
 
-bool PacketHeader::make(std::span<const std::byte, PacketHeader::size_bytes> bytes,
-                        PacketHeader& header) noexcept
+bool HeaderDecoder::make(std::span<const std::byte, size_bytes> bytes,
+                         Packet::Header& header) noexcept
 {
-  header.first_byte_indicator = first_byte_indicator_field.value(bytes);
-  if (header.first_byte_indicator != PacketByteIndicator::first)
+  if (first_byte_indicator_field.value(bytes) != header.first_byte_indicator)
   {
-    printf("Invalid first byte indicator: %zu\n", header.first_byte_indicator);
+    // printf("Invalid first byte indicator: %zu\n", header.first_byte_indicator);
     return false;
   }
 
@@ -121,37 +85,34 @@ bool PacketHeader::make(std::span<const std::byte, PacketHeader::size_bytes> byt
   header.payload_size = payload_size_field.value(bytes) - index_marker_field.size;
   header.checksum = checksum_field.value(bytes);
 
-  header.second_byte_indicator = second_byte_indicator_field.value(bytes);
-  if (header.second_byte_indicator != PacketByteIndicator::second)
+  if (second_byte_indicator_field.value(bytes) != header.second_byte_indicator)
   {
-    printf("Invalid second byte indicator: %zu\n", header.second_byte_indicator);
+    // printf("Invalid second byte indicator: %zu\n", header.second_byte_indicator);
     return false;
   }
 
-  header.index_marker = index_marker_field.value(bytes);
-  if (header.index_marker != IndexMarker::middle && header.index_marker != IndexMarker::first
-      && header.index_marker != IndexMarker::last && header.index_marker != IndexMarker::solo)
+  auto maybe_index_marker = index_marker_from_underlying(index_marker_field.value(bytes));
+  if (!maybe_index_marker)
   {
     return false;
   }
-
+  header.index_marker = *maybe_index_marker;
   return true;
 }
 
-bool PacketFooter::make(std::span<const std::byte, PacketFooter::size_bytes> bytes,
-                        PacketFooter& footer) noexcept
+bool FooterDecoder::make(std::span<const std::byte, size_bytes> bytes,
+                         Packet::Footer& footer) noexcept
 {
-  footer.third_byte_indicator = third_byte_indicator_field.value(bytes);
-  if (footer.third_byte_indicator != PacketByteIndicator::third)
+  if (third_byte_indicator_field.value(bytes) != footer.third_byte_indicator)
   {
-    printf("Invalid third byte indicator: %zu\n", footer.third_byte_indicator);
+    // printf("Invalid third byte indicator: %zu\n", footer.third_byte_indicator);
     return false;
   }
   return true;
 }
 
-void PlacementField::make(std::span<const std::byte, PlacementField::size_bytes> bytes,
-                          Placement& placement) noexcept
+void PlacementDecoder::make(std::span<const std::byte, size_bytes> bytes,
+                            Placement& placement) noexcept
 {
   placement.position = position_field.value(bytes);
 
@@ -160,123 +121,121 @@ void PlacementField::make(std::span<const std::byte, PlacementField::size_bytes>
   placement.color.g = ((color & 0b00011100) >> 2) * 32;
   placement.color.b = (color & 0b00000011) * 64;
 
-  printf("Position = %u; RGB = %u, %u, %u\n",
-         static_cast<uint32_t>(placement.position),
-         static_cast<uint32_t>(placement.color.r),
-         static_cast<uint32_t>(placement.color.g),
-         static_cast<uint32_t>(placement.color.b));
+  // printf("Position = %u; RGB = %u, %u, %u\n",
+  //        static_cast<uint32_t>(placement.position),
+  //        static_cast<uint32_t>(placement.color.r),
+  //        static_cast<uint32_t>(placement.color.g),
+  //        static_cast<uint32_t>(placement.color.b));
 }
 
-bool PlacementField::try_iter_make(std::span<const std::byte> bytes,
-                                   std::pmr::vector<Placement>& placements) noexcept
+bool PlacementDecoder::try_iter_make(std::span<const std::byte> bytes,
+                                     std::pmr::vector<Placement>& placements) noexcept
 {
-  if ((bytes.size() % PlacementField::size_bytes) != 0UL)
+  if ((bytes.size() % size_bytes) != 0UL)
   {
-    printf("Payload size must be a multiple of Placement size; %zu mod %zu != 0\n",
-           bytes.size(),
-           PlacementField::size_bytes);
+    // printf("Payload size must be a multiple of Placement size; %zu mod %zu != 0\n",
+    //        bytes.size(),
+    //        PlacementField::size_bytes);
     return false;
   }
 
-  for (size_t bytes_idx = 0UL; bytes_idx < bytes.size(); bytes_idx += PlacementField::size_bytes)
+  for (size_t bytes_idx = 0UL; bytes_idx < bytes.size(); bytes_idx += size_bytes)
   {
-    PlacementField::make(bytes.subspan(bytes_idx).template first<PlacementField::size_bytes>(),
-                         placements.emplace_back());
+    PlacementDecoder::make(bytes.subspan(bytes_idx).template first<size_bytes>(),
+                           placements.emplace_back());
   }
 
   return true;
 }
 
-Packet::Packet(std::pmr::vector<Placement>& _placements) noexcept
-    : placements{ std::pointer_traits<std::pmr::vector<Placement>*>::pointer_to(_placements) }
+ProtocolStatus PacketDecoder::try_make(std::span<const std::byte> bytes, Packet& packet) noexcept
 {
-}
-
-ProtocolStatus Packet::try_make(std::span<const std::byte> bytes, Packet& packet) noexcept
-{
-  if (bytes.size() < PacketHeader::size_bytes)
+  if (bytes.size() < HeaderDecoder::size_bytes)
   {
-    printf("Not enough bytes for header\n");
     return ProtocolStatus::insufficient_header_bytes;
   }
 
-  if (!PacketHeader::make(bytes.template subspan<0, PacketHeader::size_bytes>(), packet.header))
+  if (!HeaderDecoder::make(bytes.template subspan<0, HeaderDecoder::size_bytes>(), packet.header))
   {
-    printf("BAD HEADER\n");
     return ProtocolStatus::bad_header;
   }
 
   if (bytes.size() < (fixed_elem_size + packet.header.payload_size))
   {
-    printf("Not enough bytes for payload and footer %d < %d\n",
-           bytes.size(),
-           (fixed_elem_size + packet.header.payload_size));
+    // printf("Not enough bytes for payload and footer %d < %d\n",
+    //        bytes.size(),
+    //        (fixed_elem_size + packet.header.payload_size));
     return ProtocolStatus::incomplete;
   }
 
-  const auto payload_bytes = bytes.subspan(PacketHeader::size_bytes, packet.header.payload_size);
-  packet.placements->reserve(detail::max_placements_per_climb);
-  if (!PlacementField::try_iter_make(payload_bytes, *packet.placements))
-  {
-    printf("Failed to create placements\n");
-    return ProtocolStatus::bad_payload;
-  }
-
+  const auto payload_bytes = bytes.subspan(HeaderDecoder::size_bytes, packet.header.payload_size);
+  // TODO enum to uint8_t
   if (auto chksm = checksum(payload_bytes, packet.header.index_marker);
       chksm != packet.header.checksum)
   {
-    printf("Checksum mismatch %zu != %zu\n", chksm, packet.header.checksum);
+    // printf("Checksum mismatch %zu != %zu\n", chksm, packet.header.checksum);
     return ProtocolStatus::bad_checksum;
   }
 
-  const auto footer_bytes = bytes.subspan(PacketHeader::size_bytes + packet.header.payload_size)
-                                .template first<PacketFooter::size_bytes>();
-  if (!PacketFooter::make(footer_bytes, packet.footer))
+  const auto footer_bytes = bytes.subspan(HeaderDecoder::size_bytes + packet.header.payload_size)
+                                .template first<FooterDecoder::size_bytes>();
+  if (!FooterDecoder::make(footer_bytes, packet.footer))
   {
     return ProtocolStatus::bad_footer;
   }
 
+  packet.placements.reserve(detail::max_placements_per_climb);
+  if (!PlacementDecoder::try_iter_make(payload_bytes, packet.placements))
+  {
+    return ProtocolStatus::bad_payload;
+  }
+
   return ProtocolStatus::success;
+}
+
+ProtocolStatus do_process(const std::list<std::vector<std::byte>>& buffers,
+                          Packet& packet) noexcept
+{
+  std::vector<std::byte> buffer{};
+  for (const auto& bytes : buffers)
+  {
+    std::copy(bytes.begin(), bytes.end(), std::back_inserter(buffer));
+  }
+  return detail::PacketDecoder::try_make(buffer, packet);
 }
 } // namespace detail
 
-bool Protocol::process(std::span<const std::byte> bytes,
-                       std::pmr::vector<Placement>& placements) noexcept
+bool Protocol::process(std::span<const std::byte> bytes, Packet& packet) noexcept
 {
-  // TODO make buffer_ a ring buffer.
-  // Spans get harder though.
-  if (buffer_.size() + bytes.size() > buffer_.capacity())
+  buffers_.emplace_back(bytes.begin(), bytes.end());
+  while (!buffers_.empty())
   {
-    printf("Incoming packet would exceed buffer capacity; discarding prior packets");
-    // TODO Don't want to clear entirety since other packets + incoming may form a climb...
-    buffer_.clear();
+    switch (detail::do_process(buffers_, packet))
+    {
+    case detail::ProtocolStatus::success:
+    {
+      buffers_.clear();
+      return true;
+    }
+    case detail::ProtocolStatus::incomplete:
+    {
+      /// Wait and accumulate additional packets
+      return false;
+    }
+    case detail::ProtocolStatus::bad_header:
+    case detail::ProtocolStatus::insufficient_header_bytes:
+    case detail::ProtocolStatus::bad_payload:
+    case detail::ProtocolStatus::bad_footer:
+    case detail::ProtocolStatus::bad_checksum:
+    {
+      /// Remove the oldest and try to interpret remaining as a Packet
+      buffers_.pop_front();
+      break;
+    }
+    default:
+      std::unreachable();
+    }
   }
-
-  std::copy(bytes.begin(), bytes.end(), std::back_inserter(buffer_));
-
-  auto packet = detail::Packet{ placements };
-  switch (detail::Packet::try_make(buffer_, packet))
-  {
-  case detail::ProtocolStatus::success:
-  {
-    buffer_.clear();
-    return true;
-  }
-  case detail::ProtocolStatus::incomplete:
-  {
-    /// Accumulate additional packets
-    return false;
-  }
-  case detail::ProtocolStatus::bad_header:
-  {
-    /// Accumulate additional packets
-    // TODO may want to retain some of the packets if there are more than 1.
-    printf("BAD HEADER clearning buffer.\n");
-    buffer_.clear();
-    return false;
-  }
-  default:
-    return false;
-  }
+  return false;
 }
 } // namespace luz::protocol
