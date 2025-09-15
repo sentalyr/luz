@@ -3,6 +3,7 @@ idf_component_register(
     "."
   SRCS
     "ble.cc"
+    "buffer.cc"
     "database.cc"
     "led.cc"
     "luz.cc"

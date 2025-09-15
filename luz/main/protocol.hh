@@ -1,5 +1,6 @@
 #pragma once
 
+#include "buffer.hh"
 #include "packet.hh"
 
 #include <array>
@@ -90,8 +91,6 @@ private:
 
   std::array<Placement, detail::max_placements_per_climb> placement_memory_{};
 
-  std::list<std::vector<std::byte>> buffers_{};
+  BufferList buffer_list_{};
 };
 } // namespace luz::protocol
-
-#include "protocol.inl"

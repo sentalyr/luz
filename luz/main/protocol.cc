@@ -1,4 +1,5 @@
 #include "protocol.hh"
+#include "buffer.hh"
 #include "field.hh"
 #include "packet.hh"
 
@@ -193,28 +194,22 @@ ProtocolStatus PacketDecoder::try_make(std::span<const std::byte> bytes, Packet&
   return ProtocolStatus::success;
 }
 
-ProtocolStatus do_process(const std::list<std::vector<std::byte>>& buffers,
-                          Packet& packet) noexcept
+ProtocolStatus do_process(const BufferList& buffers, Packet& packet) noexcept
 {
-  std::vector<std::byte> buffer{};
-  for (const auto& bytes : buffers)
-  {
-    std::copy(bytes.begin(), bytes.end(), std::back_inserter(buffer));
-  }
-  return detail::PacketDecoder::try_make(buffer, packet);
+  return detail::PacketDecoder::try_make(buffers.flatten(), packet);
 }
 } // namespace detail
 
 bool Protocol::process(std::span<const std::byte> bytes, Packet& packet) noexcept
 {
-  buffers_.emplace_back(bytes.begin(), bytes.end());
-  while (!buffers_.empty())
+  buffer_list_.emplace_back(bytes.begin(), bytes.end());
+  while (!buffer_list_.empty())
   {
-    switch (detail::do_process(buffers_, packet))
+    switch (detail::do_process(buffer_list_, packet))
     {
     case detail::ProtocolStatus::success:
     {
-      buffers_.clear();
+      buffer_list_.clear();
       return true;
     }
     case detail::ProtocolStatus::incomplete:
@@ -229,7 +224,7 @@ bool Protocol::process(std::span<const std::byte> bytes, Packet& packet) noexcep
     case detail::ProtocolStatus::bad_checksum:
     {
       /// Remove the oldest and try to interpret remaining as a Packet
-      buffers_.pop_front();
+      buffer_list_.pop_front();
       break;
     }
     default:
