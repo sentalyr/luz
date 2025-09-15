@@ -47,7 +47,6 @@ void CharacteristicCallbacks<OnWriteCallback>::onWrite(NimBLECharacteristic* cha
   }
   ESP_LOGI(detail::tag, "\t%s", print_buf.data());
 
-  // TODO std::as_bytes(span)
   std::invoke(*on_write_callback_, std::as_bytes(std::span{ value.data(), value.size() }));
 }
 } // namespace detail

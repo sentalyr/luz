@@ -29,7 +29,7 @@ constexpr auto wilbur_wright_takes_flight_expected = std::array{
   Placement{ 380U, Color{ 224, 0, 192 } }, Placement{ 376U, Color{ 0, 0, 192 } },
 };
 
-TEST_CASE("top row")
+TEST_CASE("top row", "[top_row]")
 {
   constexpr auto top_row_p1
       = std::array{ std::byte{ 1 },   std::byte{ 52 },  std::byte{ 32 },  std::byte{ 2 },
